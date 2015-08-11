@@ -37,13 +37,39 @@ Lon_Lat_Loc$Lon <- Lon_Lat_Loc$Lon + 360
 
 Loc_Date<-as.data.frame(cbind(Lon_Lat_Loc,plant_date,harvest_date))
 loc_minmax<-c(min(gcode[,1]),max(gcode[,1]),min(gcode[,2]),max(gcode[,2]))
-wx.test<-NCEP.gather(variable='air.sig995',level='surface',
+wx.test<-NCEP.gather(variable=c('air.sig995','lftx.sfc','omega.sig995'),level='surface',
             months.minmax = c(5,10),years.minmax = c(2014,2014),
             lat.southnorth = c(loc_minmax[3:4]), lon.westeast = c(loc_minmax[1:2]),
             reanalysis2 = FALSE, return.units = TRUE)
+
 wx.ag<-NCEP.aggregate(wx.test, YEARS = TRUE, MONTHS = FALSE, DAYS = FALSE,
                HOURS = FALSE,fxn='mean')
 detach(test_data)
+
+
+##  NCEP.array2df <- coverts array output into data frame
+## create a for-loop to bring in weather data for several metrics
+metrics <- c('air.sig995','lftx.sfc','omega.sig995')
+
+for (i in 1:length(metrics)) {
+
+loc_minmax<-c(min(gcode[,1]),max(gcode[,1]),min(gcode[,2]),max(gcode[,2]))
+wx.test<-NCEP.gather(variable= metrics[i],level='surface',
+                     months.minmax = c(5,10),years.minmax = c(2014,2014),
+                     lat.southnorth = c(loc_minmax[3:4]), lon.westeast = c(loc_minmax[1:2]),
+                     reanalysis2 = FALSE, return.units = TRUE)
+
+wx.ag<-NCEP.aggregate(wx.test, YEARS = TRUE, MONTHS = FALSE, DAYS = FALSE,
+                      HOURS = FALSE,fxn='mean')
+
+
+  wx.df <- NCEP.array2df(wx.ag)
+  colnames(wx.df)[4] <- metrics[[i]]
+
+if (i == 1 ) wx.output <- wx.df
+if (i > 1) wx.output <-as.data.frame(cbind(wx.output, wx.df[4]))
+  
+}
 
 ## Function to round lon/lat
 roundTo <- function(x, y){
@@ -57,15 +83,20 @@ Lon_Lat_Loc$Lon2 <- unlist(lapply(Lon_Lat_Loc[,1], function(x) roundTo(x, seq(27
 Lon_Lat_Loc$Lat2 <- unlist(lapply(Lon_Lat_Loc[,2], function(x) roundTo(x, seq(37.5, 42.5, 2.5))))
 
 
-wx.ag2 <- wx.ag %>% 
-  unclass() %>%
-  as.data.frame() %>%
-  mutate(lat = row.names(.)) %>%
-  gather(lon, yearly.avg, -lat) %>%
-  mutate(lon = as.numeric(gsub(".2014_XX_XX_XX", '', lon)),
-         lat = as.numeric(lat)) %>%
-  rename(Lat2 = lat, 
-         Lon2 = lon)
+# wx.ag2 <- wx.ag %>% 
+#   unclass() %>%
+#   as.data.frame() %>%
+#   mutate(lat = row.names(.)) %>%
+#   gather(lon, yearly.avg, -lat) %>%
+#   mutate(lon = as.numeric(gsub(".2014_XX_XX_XX", '', lon)),
+#          lat = as.numeric(lat)) %>%
+#   rename(Lat2 = lat, 
+#          Lon2 = lon)
+
+wx.ag2 <- wx.output %>%
+  select(-datetime) %>%
+  rename(Lat2 = latitude, 
+         Lon2 = longitude)
 
 ## Merge Lon_Lat_Loc to wx.ag2 
 ## also, merge that do test_data 
@@ -77,11 +108,10 @@ Lon_Lat_Loc$Loc <- as.character(Lon_Lat_Loc$Loc)
 # Becareful with duplicate rows after joining to test_data2
 inputData <- Lon_Lat_Loc %>%
   inner_join(., wx.ag2, by=c('Lat2', 'Lon2')) %>%
-  distinct(Lon, Lat, Loc, Lon2, Lat2, yearly.avg) %>%
+  distinct() %>%
   inner_join(., test_data2, by = 'Loc') %>%
   mutate(yield = yield_bu.A, 
          yield = as.numeric(gsub('\\*', '', yield)))
-  
 
 ##
 ##
@@ -98,12 +128,13 @@ finalInput <- inputData %>%
   select(Loc, brand_hybrid, yearly.avg, yield)
 
 ## Using Prof Reg
-covName <- names(finalInput[3])
+covName <- names(finalInput[1:3])
 
 mod <- profRegr(covName, outcome = 'yield', 
-                yModel = 'Normal', xModel = "Normal",
+                yModel = 'Normal', xModel = "Mixed",
                 #fixedEffectsNames = 'yield',
-                #discreteCovs = 
+                discreteCovs = 'brand_hybrid',
+                continuousCovs = 'yearly.avg',
                 data = finalInput)
 
 # dissimilarity Matrix
