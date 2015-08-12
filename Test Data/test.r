@@ -12,7 +12,9 @@ library(plyr)
 library(dplyr)
 library(tidyr)
 
-Loc<-as.character(Loc[1:222]) # focus on southwestern for now
+test_data$district <- tolower(test_data$district)
+test_data$district <- gsub('^(southwester)$', 'southwestern', test_data$district)
+Loc<-as.character(Loc) # focus on southwestern for now
 yield<-as.numeric(substr(yield_bu.A,1,5))
 ###codes lat/lon for the 32 unique locations that will be assigned to every observation
 ###geocoding works through google API, and it is much faster to query only as often as is
@@ -79,8 +81,10 @@ roundTo <- function(x, y){
 }
 
 ## Apply function to Longitute and Latitude
-Lon_Lat_Loc$Lon2 <- unlist(lapply(Lon_Lat_Loc[,1], function(x) roundTo(x, seq(275, 280, 2.5))))
-Lon_Lat_Loc$Lat2 <- unlist(lapply(Lon_Lat_Loc[,2], function(x) roundTo(x, seq(37.5, 42.5, 2.5))))
+#Lon_Lat_Loc$Lon2 <- unlist(lapply(Lon_Lat_Loc[,1], function(x) roundTo(x, seq(275, 280, 2.5))))
+#Lon_Lat_Loc$Lat2 <- unlist(lapply(Lon_Lat_Loc[,2], function(x) roundTo(x, seq(37.5, 42.5, 2.5))))
+Lon_Lat_Loc$Lon2 <- unlist(lapply(Lon_Lat_Loc[,1], function(x) roundTo(x, seq(min(wx.output$longitude), max(wx.output$longitude), 2.5))))
+Lon_Lat_Loc$Lat2 <- unlist(lapply(Lon_Lat_Loc[,2], function(x) roundTo(x, seq(min(wx.output$latitude), max(wx.output$latitude), 2.5))))
 
 
 # wx.ag2 <- wx.ag %>% 
@@ -101,15 +105,15 @@ wx.ag2 <- wx.output %>%
 ## Merge Lon_Lat_Loc to wx.ag2 
 ## also, merge that do test_data 
 
-test_data2 <- test_data[1:222,]
-test_data2$Loc <- as.character(test_data2$Loc)
+#test_data2 <- test_data[1:222,]
+#test_data2$Loc <- as.character(test_data2$Loc)
 Lon_Lat_Loc$Loc <- as.character(Lon_Lat_Loc$Loc)
 
 # Becareful with duplicate rows after joining to test_data2
 inputData <- Lon_Lat_Loc %>%
   inner_join(., wx.ag2, by=c('Lat2', 'Lon2')) %>%
   distinct() %>%
-  inner_join(., test_data2, by = 'Loc') %>%
+  inner_join(., test_data, by = 'Loc') %>%
   mutate(yield = yield_bu.A, 
          yield = as.numeric(gsub('\\*', '', yield)))
 
@@ -123,18 +127,21 @@ inputData <- Lon_Lat_Loc %>%
 ##
 
 ## create data frame with ONLY variables of interest
-
-finalInput <- inputData %>%
-  select(Loc, brand_hybrid, yearly.avg, yield)
+finalInput <- inputData[c('yield','Loc','brand_hybrid', metrics)]
 
 ## Using Prof Reg
-covName <- names(finalInput[1:3])
+covName <- names(finalInput[2:length(finalInput)])
+
+## determine numeric variables
+numericVars <- which(sapply(finalInput, class)=='numeric' & names(finalInput) != 'yield')
+categoricalVars <- which(sapply(finalInput, class)=='character' & names(finalInput) != 'yield')
 
 mod <- profRegr(covName, outcome = 'yield', 
                 yModel = 'Normal', xModel = "Mixed",
+                #nCovariates = 2,
                 #fixedEffectsNames = 'yield',
-                discreteCovs = 'brand_hybrid',
-                continuousCovs = 'yearly.avg',
+                discreteCovs = c(names(finalInput[categoricalVars])),
+                continuousCovs = c(names(finalInput[numericVars])),
                 data = finalInput)
 
 # dissimilarity Matrix
@@ -143,3 +150,9 @@ heatDissMat(calcDists)
 
 # clustering
 clusts <- calcOptimalClustering(calcDists)
+
+# risk profile obj
+riskProfileOb <- calcAvgRiskAndProfile(clusts)
+
+# plot risk profile
+plotRiskProfile(riskProfileOb, outFile = "summary.png")
