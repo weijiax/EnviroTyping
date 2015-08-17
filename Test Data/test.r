@@ -51,7 +51,8 @@ detach(test_data)
 
 ##  NCEP.array2df <- coverts array output into data frame
 ## create a for-loop to bring in weather data for several metrics
-metrics <- c('air.sig995','lftx.sfc','omega.sig995')
+metrics <- c('air.sig995','lftx.sfc','omega.sig995', 'pottmp.sig995',
+             'pr_wtr.eatm', 'pres.sfc','rhum.sig995','slp', 'uwnd.sig995','vwnd.sig995')
 
 for (i in 1:length(metrics)) {
 
@@ -127,7 +128,7 @@ inputData <- Lon_Lat_Loc %>%
 ##
 
 ## create data frame with ONLY variables of interest
-finalInput <- inputData[c('yield','Loc','brand_hybrid', metrics)]
+finalInput <- inputData[c('yield', 'brand_hybrid', metrics)]
 
 ## Using Prof Reg
 covName <- names(finalInput[2:length(finalInput)])
@@ -136,13 +137,16 @@ covName <- names(finalInput[2:length(finalInput)])
 numericVars <- which(sapply(finalInput, class)=='numeric' & names(finalInput) != 'yield')
 categoricalVars <- which(sapply(finalInput, class)=='character' & names(finalInput) != 'yield')
 
-mod <- profRegr(covName, outcome = 'yield', 
+system.time({
+
+  mod <- profRegr(covName, outcome = 'yield', 
                 yModel = 'Normal', xModel = "Mixed",
                 #nCovariates = 2,
                 #fixedEffectsNames = 'yield',
                 discreteCovs = c(names(finalInput[categoricalVars])),
                 continuousCovs = c(names(finalInput[numericVars])),
                 data = finalInput)
+})
 
 # dissimilarity Matrix
 calcDists <- calcDissimilarityMatrix(mod)
@@ -155,4 +159,13 @@ clusts <- calcOptimalClustering(calcDists)
 riskProfileOb <- calcAvgRiskAndProfile(clusts)
 
 # plot risk profile
-plotRiskProfile(riskProfileOb, outFile = "summary.png")
+s1 <- metrics[1:5]
+s2 <- metrics[6:10]
+
+plotRiskProfile(riskProfileOb, outFile = "summary1.png", whichCovariates = s1)
+plotRiskProfile(riskProfileOb, outFile = "summary2.png", whichCovariates = s2)
+
+# Pull out cluster membership and attached to data 
+
+clusterData <- clusts$clustering
+inputData$cluster <-as.factor(clusterData)
