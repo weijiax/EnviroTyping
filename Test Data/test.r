@@ -51,8 +51,19 @@ detach(test_data)
 
 ##  NCEP.array2df <- coverts array output into data frame
 ## create a for-loop to bring in weather data for several metrics
-metrics <- c('air.sig995','lftx.sfc','omega.sig995', 'pottmp.sig995',
-             'pr_wtr.eatm', 'pres.sfc','rhum.sig995','slp', 'uwnd.sig995','vwnd.sig995')
+metrics <- c('air.sig995',
+             #'lftx.sfc',
+             'omega.sig995', 
+             #'pottmp.sig995',
+             #'pr_wtr.eatm',
+             'pres.sfc',
+             'rhum.sig995',
+             #'slp',
+             'uwnd.sig995',
+             'vwnd.sig995')
+
+
+             #'soilw.0-10cm', 'soilw.10-200cm', 'sfcr.sfc', 'prate.sfc')
 
 for (i in 1:length(metrics)) {
 
@@ -63,14 +74,21 @@ wx.test<-NCEP.gather(variable= metrics[i],level='surface',
                      reanalysis2 = FALSE, return.units = TRUE)
 
 wx.ag<-NCEP.aggregate(wx.test, YEARS = TRUE, MONTHS = FALSE, DAYS = FALSE,
-                      HOURS = FALSE,fxn='mean')
+                      HOURS = FALSE,fxn= 'mean')
+
+wx.ag2<-NCEP.aggregate(wx.test, YEARS = TRUE, MONTHS = FALSE, DAYS = FALSE,
+                      HOURS = FALSE,fxn= 'var')
 
 
   wx.df <- NCEP.array2df(wx.ag)
-  colnames(wx.df)[4] <- metrics[[i]]
+  wx.df2 <- NCEP.array2df(wx.ag2)
+  
+  colnames(wx.df)[4] <- paste0(metrics[[i]], '_mean')
+  colnames(wx.df2)[4] <- paste0(metrics[[i]], '_variance')
+  
 
-if (i == 1 ) wx.output <- wx.df
-if (i > 1) wx.output <-as.data.frame(cbind(wx.output, wx.df[4]))
+if (i == 1 ) wx.output <- as.data.frame(cbind(wx.df, wx.df2[4]))
+if (i > 1) wx.output <-as.data.frame(cbind(wx.output, wx.df[4], wx.df2[4]))
   
 }
 
@@ -118,6 +136,15 @@ inputData <- Lon_Lat_Loc %>%
   mutate(yield = yield_bu.A, 
          yield = as.numeric(gsub('\\*', '', yield)))
 
+# subset data to those where brand_hybrid > 3
+inputData <- inputData %>% 
+  group_by(brand_hybrid) %>%
+  mutate(count = n()) %>%
+  filter(count > 3) %>%
+  select(-count) %>%
+  ungroup() 
+
+
 ##
 ##
 ## Now, try to get the data into profRegr
@@ -128,7 +155,16 @@ inputData <- Lon_Lat_Loc %>%
 ##
 
 ## create data frame with ONLY variables of interest
-finalInput <- inputData[c('yield', 'brand_hybrid', metrics)]
+metrics_mean <- c(paste0(metrics, "_mean"), paste0(metrics, '_variance'))
+finalInput <- inputData[c('yield', 'brand_hybrid', metrics_mean)]
+
+## filter down to brand_hybrids > 3
+finalInput <- finalInput %>% 
+  group_by(brand_hybrid) %>%
+  mutate(count = n()) %>%
+  filter(count > 3) %>%
+  select(-count) %>%
+  ungroup() 
 
 ## Using Prof Reg
 covName <- names(finalInput[2:length(finalInput)])
@@ -150,7 +186,7 @@ system.time({
 
 # dissimilarity Matrix
 calcDists <- calcDissimilarityMatrix(mod)
-heatDissMat(calcDists)
+#heatDissMat(calcDists)
 
 # clustering
 clusts <- calcOptimalClustering(calcDists)
@@ -159,13 +195,89 @@ clusts <- calcOptimalClustering(calcDists)
 riskProfileOb <- calcAvgRiskAndProfile(clusts)
 
 # plot risk profile
-s1 <- metrics[1:5]
-s2 <- metrics[6:10]
+s1 <- metrics_mean[1:6]
+s2 <- metrics_mean[7:12]
+#s3 <- metrics_mean[11:15]
+#s4 <- metrics_mean[16:20]
 
 plotRiskProfile(riskProfileOb, outFile = "summary1.png", whichCovariates = s1)
 plotRiskProfile(riskProfileOb, outFile = "summary2.png", whichCovariates = s2)
+#plotRiskProfile(riskProfileOb, outFile = "summary3.png", whichCovariates = s3)
+#plotRiskProfile(riskProfileOb, outFile = "summary4.png", whichCovariates = s4)
 
 # Pull out cluster membership and attached to data 
 
 clusterData <- clusts$clustering
-inputData$cluster <-as.factor(clusterData)
+inputData$cluster <-as.character(clusterData)
+
+
+
+#
+#
+# Compute cluster descriptives 
+#
+#
+
+inputData %>% 
+  group_by(cluster) %>%
+  summarise_each(funs(mean, median, min, max, sd), air.sig995:vwnd.sig995, yield, -cluster) %>%
+  gather(key, value, -cluster) %>%
+  #separate(key, c('metric', 'statistic'), sep = '') %>%
+  extract(key, c('metric', 'statistic'), "(.+)_(\\w+)$") %>%
+  spread(statistic, value) %>%
+  arrange(metric)
+
+# deviation from average yield by cluster
+inputData %>%
+  group_by(cluster) %>%
+  mutate(cluster_avg = mean(yield)) %>%
+  ungroup() %>%
+  group_by(brand_hybrid) %>%
+  #filter(n() > 3) %>%
+  mutate(deviation = yield/cluster_avg) %>%
+  select(brand_hybrid, cluster, yield, cluster_avg, deviation)
+  
+
+# Plot cluster inputData
+inputData %>% 
+  gather(key, value, air.sig995_mean:vwnd.sig995_variance) %>%
+  extract(key, c('metric', 'statistic'), "(.+)_(\\w+)$") %>%
+  qplot(as.factor(cluster),value, data = ., size = yield) +
+  facet_wrap(statistic~key, scales = 'free')
+
+# Plot cluster inputData
+inputData %>%
+  gather(key, value, air.sig995_mean:vwnd.sig995_variance) %>%
+  qplot(value, yield, data = ., color = as.factor(cluster)) +
+  facet_wrap(~key, scales = 'free')
+
+inputData %>% 
+  qplot(as.factor(brand_hybrid), yield, inputData = ., color= as.factor(cluster)) +
+  coord_flip()
+
+## max percentage deviation from the brand_hybrid average
+
+inputData %>% 
+  group_by(brand_hybrid) %>%
+  mutate(brand_hybrid_avg = mean(yield),
+         deviation = (yield - brand_hybrid_avg)/brand_hybrid_avg,
+         base = n()) %>%
+  filter(base >= 4) %>%
+  filter(abs(deviation) >= .10) %>%
+  qplot(deviation, data = ., fill = as.factor(cluster))
+
+inputData %>% 
+  group_by(brand_hybrid) %>%
+  mutate(brand_hybrid_avg = mean(yield),
+         deviation = (yield - brand_hybrid_avg)/brand_hybrid_avg,
+         base = n()) %>%
+  filter(base >= 4) %>%
+  filter(abs(deviation) >= .10) %>%
+  qplot(Lat2, Lon2, data = ., size = deviation, color = as.factor(cluster))
+
+# get map
+map <- get_map(location = 'United States', zoom = 5)
+
+mapPoints <- ggmap(map) +
+  geom_point(aes(x=Lon, y=Lat, size = yield), data = inputData)
+
