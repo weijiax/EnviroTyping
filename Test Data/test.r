@@ -175,7 +175,7 @@ categoricalVars <- which(sapply(finalInput, class)=='character' & names(finalInp
 
 system.time({
 
-  mod <- profRegr(covName, outcome = 'yield', 
+  mod <- profRegr(covName, outcome = 'Yield', 
                 yModel = 'Normal', xModel = "Mixed",
                 #nCovariates = 2,
                 #fixedEffectsNames = 'yield',
